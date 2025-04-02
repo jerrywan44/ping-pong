@@ -1,1 +1,1242 @@
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreElement = document.getElementById('score');
+const winnerElement = document.getElementById('winner');
+const restartButton = document.getElementById('restartButton');
+const mobileControls = document.getElementById('mobileControls');
+const pauseButton = document.getElementById('pauseButton');
+const touchIndicator = document.getElementById('touchIndicator');
+const countdownElement = document.getElementById('countdown');
+const powerUpElement = document.getElementById('powerUp');
 
+// Sound effects
+const sounds = {
+    paddleHit: new Audio('https://audio-previews.elements.envatousercontent.com/files/302649344/preview.mp3'),
+    score: new Audio('https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3'),
+    powerUp: new Audio('https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3'),
+    gameOver: new Audio('https://audio-previews.elements.envatousercontent.com/files/306214816/preview.mp3')
+};
+
+// Set volume for all sounds
+Object.values(sounds).forEach(sound => {
+    sound.volume = 0.3;
+});
+
+let isPaused = false;
+let lastScore = 0;
+let gameStarted = false;
+let countdown = 3;
+let powerUpActive = false;
+let powerUpTimer = 0;
+let powerUpDuration = 5000; // 5 seconds
+
+// Add power shot state
+let powerShot = {
+    player1: false,
+    player2: false,
+    cooldown: 8000, // Increased to 8 seconds cooldown
+    lastUsed: {
+        player1: 0,
+        player2: 0
+    },
+    strength: {
+        speed: 2.5,    // Increased from 2.0 to 2.5
+        vertical: 1.8   // Increased from 1.5 to 1.8
+    }
+};
+
+// Add new visual effects state
+let visualEffects = {
+    powerShotTrail: [],
+    paddleGlow: {
+        player1: 0,
+        player2: 0
+    },
+    screenShake: {
+        intensity: 0,
+        duration: 0
+    },
+    scoreFlash: {
+        active: false,
+        duration: 0,
+        color: '#FFD700'
+    },
+    powerUpFlash: {
+        active: false,
+        duration: 0,
+        color: '#FFD700'
+    },
+    paddleRipples: [],
+    ballTrails: [],
+    specialEvents: []
+};
+
+// Add paddle ripple effect
+class PaddleRipple {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.radius = 0;
+        this.maxRadius = 50;
+        this.opacity = 1;
+        this.speed = 3;
+    }
+
+    update() {
+        this.radius += this.speed;
+        this.opacity = 1 - (this.radius / this.maxRadius);
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = this.color;
+        ctx.globalAlpha = this.opacity;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
+}
+
+// Add ball trail effect
+class BallTrail {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.size = ballSize * 0.8;
+        this.opacity = 1;
+        this.fadeSpeed = 0.1;
+    }
+
+    update() {
+        this.opacity -= this.fadeSpeed;
+    }
+
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = this.opacity;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+// Add special event effect
+class SpecialEvent {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.size = 0;
+        this.maxSize = 100;
+        this.opacity = 1;
+        this.speed = 5;
+        this.rotation = 0;
+        this.color = type === 'score' ? '#FFD700' : 
+                    type === 'powerUp' ? '#FFD700' :
+                    type === 'powerShot' ? '#FF6B6B' :
+                    type === 'paddleWave' ? '#4ECDC4' :
+                    type === 'gameStart' ? '#4CAF50' : '#FFD700';
+    }
+
+    update() {
+        this.size += this.speed;
+        this.opacity = 1 - (this.size / this.maxSize);
+        this.rotation += 0.1;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        ctx.globalAlpha = this.opacity;
+        
+        switch(this.type) {
+            case 'score':
+                // Draw star burst
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(
+                        Math.cos(angle) * this.size,
+                        Math.sin(angle) * this.size
+                    );
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+                break;
+
+            case 'powerUp':
+                // Draw spiral
+                ctx.beginPath();
+                for (let i = 0; i < 20; i++) {
+                    const angle = i * 0.5;
+                    const radius = (i / 20) * this.size;
+                    const x = Math.cos(angle) * radius;
+                    const y = Math.sin(angle) * radius;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                break;
+
+            case 'powerShot':
+                // Draw energy burst
+                for (let i = 0; i < 12; i++) {
+                    const angle = (i / 12) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(
+                        Math.cos(angle) * this.size,
+                        Math.sin(angle) * this.size
+                    );
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+                }
+                // Draw inner circle
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size * 0.3, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                break;
+
+            case 'paddleWave':
+                // Draw wave effect
+                ctx.beginPath();
+                for (let i = 0; i < 3; i++) {
+                    const radius = this.size * (1 - i * 0.2);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+                break;
+
+            case 'gameStart':
+                // Draw expanding rings
+                for (let i = 0; i < 3; i++) {
+                    const radius = this.size * (1 - i * 0.2);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+                // Draw center text
+                ctx.fillStyle = this.color;
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('GO!', 0, 8);
+                break;
+        }
+        
+        ctx.restore();
+    }
+}
+
+// Add power shot trail effect
+class PowerShotTrail {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.size = ballSize * 2;
+        this.life = 1;
+        this.speed = 0.05;
+    }
+
+    update() {
+        this.life -= this.speed;
+        this.size *= 0.95;
+    }
+
+    draw(ctx) {
+        const gradient = ctx.createRadialGradient(
+            this.x, this.y, 0,
+            this.x, this.y, this.size
+        );
+        gradient.addColorStop(0, this.color);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.fillStyle = gradient;
+        ctx.globalAlpha = this.life;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+// Add screen shake effect
+function applyScreenShake() {
+    if (visualEffects.screenShake.duration > 0) {
+        const intensity = visualEffects.screenShake.intensity;
+        const offsetX = (Math.random() - 0.5) * intensity;
+        const offsetY = (Math.random() - 0.5) * intensity;
+        
+        canvas.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+        visualEffects.screenShake.duration--;
+        
+        if (visualEffects.screenShake.duration <= 0) {
+            canvas.style.transform = 'none';
+        }
+    }
+}
+
+// Set canvas size
+function resizeCanvas() {
+    const container = document.getElementById('gameContainer');
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+}
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// Game objects
+const paddleHeight = canvas.height * 0.15;
+const paddleWidth = canvas.width * 0.02;
+const ballSize = canvas.width * 0.01;
+let currentPaddleHeight = paddleHeight;
+
+let player1Score = 0;
+let player2Score = 0;
+let gameWon = false;
+
+// Player 1 paddle
+let player1 = {
+    y: canvas.height / 2 - paddleHeight / 2,
+    speed: 0,
+    color: '#FF6B6B',
+    powerUp: false,
+    originalY: 0
+};
+
+// Player 2 paddle
+let player2 = {
+    y: canvas.height / 2 - paddleHeight / 2,
+    speed: 0,
+    color: '#4ECDC4',
+    powerUp: false,
+    originalY: 0
+};
+
+// Ball
+let ball = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    speedX: canvas.width * 0.005,
+    speedY: canvas.height * 0.005,
+    color: '#FFE66D'
+};
+
+// Power-up
+let powerUp = {
+    x: 0,
+    y: 0,
+    active: false,
+    type: null
+};
+
+// Game controls
+const paddleSpeed = canvas.height * 0.01;
+const maxScore = 11;
+
+// Touch controls
+let touchStartY = 0;
+let activePaddle = null;
+let lastTouchY = 0;
+let touchStartX = 0;
+
+function showTouchIndicator(x, y) {
+    touchIndicator.style.display = 'block';
+    touchIndicator.style.left = (x - 20) + 'px';
+    touchIndicator.style.top = (y - 20) + 'px';
+    setTimeout(() => {
+        touchIndicator.style.display = 'none';
+    }, 500);
+}
+
+function startCountdown() {
+    countdownElement.style.display = 'block';
+    const countdownInterval = setInterval(() => {
+        countdown--;
+        countdownElement.textContent = countdown;
+        if (countdown <= 0) {
+            clearInterval(countdownInterval);
+            countdownElement.style.display = 'none';
+            gameStarted = true;
+            gameLoop();
+        }
+    }, 1000);
+}
+
+function spawnPowerUp() {
+    if (Math.random() < 0.1 && !powerUp.active) { // 10% chance to spawn
+        powerUp.x = canvas.width / 2;
+        powerUp.y = Math.random() * (canvas.height - 20);
+        powerUp.active = true;
+        powerUp.type = Math.random() < 0.5 ? 'speed' : 'size';
+        powerUpElement.style.display = 'block';
+        powerUpElement.style.left = powerUp.x + 'px';
+        powerUpElement.style.top = powerUp.y + 'px';
+    }
+}
+
+function activatePowerUp(player) {
+    if (player.powerUp) return; // Prevent multiple power-ups
+
+    player.powerUp = true;
+    powerUpTimer = Date.now();
+    player.originalY = player.y; // Store original position
+
+    if (powerUp.type === 'speed') {
+        ball.speedX *= 1.5;
+        ball.speedY *= 1.5;
+    } else if (powerUp.type === 'size') {
+        // Adjust paddle position when growing to maintain center point
+        const oldHeight = currentPaddleHeight;
+        currentPaddleHeight = paddleHeight * 1.5;
+        const heightDiff = currentPaddleHeight - oldHeight;
+        player.y -= heightDiff / 2;
+        
+        // Keep paddle within bounds
+        if (player.y < 0) player.y = 0;
+        if (player.y + currentPaddleHeight > canvas.height) {
+            player.y = canvas.height - currentPaddleHeight;
+        }
+    }
+
+    setTimeout(() => {
+        player.powerUp = false;
+        if (powerUp.type === 'speed') {
+            ball.speedX /= 1.5;
+            ball.speedY /= 1.5;
+        } else if (powerUp.type === 'size') {
+            // Adjust paddle position when shrinking
+            const oldHeight = currentPaddleHeight;
+            currentPaddleHeight = paddleHeight;
+            const heightDiff = oldHeight - currentPaddleHeight;
+            player.y += heightDiff / 2;
+            
+            // Keep paddle within bounds
+            if (player.y < 0) player.y = 0;
+            if (player.y + currentPaddleHeight > canvas.height) {
+                player.y = canvas.height - currentPaddleHeight;
+            }
+        }
+    }, powerUpDuration);
+}
+
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    showTouchIndicator(x, y);
+    
+    if (x < canvas.width / 2) {
+        activePaddle = player1;
+    } else {
+        activePaddle = player2;
+    }
+    
+    touchStartY = y;
+    lastTouchY = y;
+    touchStartX = x;
+    mobileControls.style.display = 'none';
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    if (!activePaddle || isPaused || !gameStarted) return;
+
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    const deltaY = y - lastTouchY;
+    const deltaX = x - touchStartX;
+    const newY = activePaddle.y + deltaY;
+    
+    if (newY >= 0 && newY <= canvas.height - currentPaddleHeight) {
+        activePaddle.y = newY;
+    }
+
+    // Check for power shot swipe
+    const now = Date.now();
+    if (Math.abs(deltaX) > 50) { // Minimum swipe distance
+        if (activePaddle === player1 && deltaX > 0 && now - powerShot.lastUsed.player1 >= powerShot.cooldown) {
+            powerShot.player1 = true;
+            powerShot.lastUsed.player1 = now;
+            playSound('powerUp', 0.5);
+        } else if (activePaddle === player2 && deltaX < 0 && now - powerShot.lastUsed.player2 >= powerShot.cooldown) {
+            powerShot.player2 = true;
+            powerShot.lastUsed.player2 = now;
+            playSound('powerUp', 0.5);
+        }
+    }
+    
+    lastTouchY = y;
+}
+
+function handleTouchEnd(e) {
+    e.preventDefault();
+    activePaddle = null;
+}
+
+// Add touch event listeners
+canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+// Pause button functionality
+pauseButton.addEventListener('click', () => {
+    isPaused = !isPaused;
+    pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
+    if (!isPaused && gameStarted) {
+        gameLoop();
+    }
+});
+
+// Keyboard controls (for desktop)
+document.addEventListener('keydown', (e) => {
+    if (gameWon || isPaused || !gameStarted) return;
+
+    const now = Date.now();
+    
+    switch(e.key) {
+        case 'w':
+            player1.speed = -paddleSpeed;
+            break;
+        case 's':
+            player1.speed = paddleSpeed;
+            break;
+        case 'd':
+            if (now - powerShot.lastUsed.player1 >= powerShot.cooldown) {
+                powerShot.player1 = true;
+                powerShot.lastUsed.player1 = now;
+                playSound('powerUp', 0.5);
+            }
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            player2.speed = -paddleSpeed;
+            break;
+        case 'ArrowDown':
+            e.preventDefault();
+            player2.speed = paddleSpeed;
+            break;
+        case '<':
+            if (now - powerShot.lastUsed.player2 >= powerShot.cooldown) {
+                powerShot.player2 = true;
+                powerShot.lastUsed.player2 = now;
+                playSound('powerUp', 0.5);
+            }
+            break;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (gameWon || isPaused || !gameStarted) return;
+
+    switch(e.key) {
+        case 'w':
+        case 's':
+            player1.speed = 0;
+            break;
+        case 'ArrowUp':
+        case 'ArrowDown':
+            player2.speed = 0;
+            break;
+    }
+});
+
+// Restart game
+restartButton.addEventListener('click', () => {
+    player1Score = 0;
+    player2Score = 0;
+    gameWon = false;
+    isPaused = false;
+    gameStarted = false;
+    countdown = 3;
+    winnerElement.style.display = 'none';
+    restartButton.style.display = 'none';
+    pauseButton.textContent = 'Pause';
+    mobileControls.style.display = 'block';
+    powerUp.active = false;
+    powerUpElement.style.display = 'none';
+    resetBall();
+    startCountdown();
+});
+
+// Update game objects
+function update() {
+    if (isPaused || !gameStarted) return;
+
+    // Update visual effects
+    if (visualEffects.scoreFlash.active) {
+        visualEffects.scoreFlash.duration--;
+        if (visualEffects.scoreFlash.duration <= 0) {
+            visualEffects.scoreFlash.active = false;
+        }
+    }
+
+    if (visualEffects.powerUpFlash.active) {
+        visualEffects.powerUpFlash.duration--;
+        if (visualEffects.powerUpFlash.duration <= 0) {
+            visualEffects.powerUpFlash.active = false;
+        }
+    }
+
+    // Update paddle ripples
+    visualEffects.paddleRipples = visualEffects.paddleRipples.filter(ripple => {
+        ripple.update();
+        return ripple.opacity > 0;
+    });
+
+    // Update ball trails
+    visualEffects.ballTrails = visualEffects.ballTrails.filter(trail => {
+        trail.update();
+        return trail.opacity > 0;
+    });
+
+    // Update special events
+    visualEffects.specialEvents = visualEffects.specialEvents.filter(event => {
+        event.update();
+        return event.opacity > 0;
+    });
+
+    // Add new ball trail
+    visualEffects.ballTrails.push(new BallTrail(ball.x, ball.y, ball.color));
+
+    // Update power shot trails
+    visualEffects.powerShotTrail = visualEffects.powerShotTrail.filter(trail => {
+        trail.update();
+        return trail.life > 0;
+    });
+
+    // Update paddle glow effects
+    visualEffects.paddleGlow.player1 = Math.max(0, visualEffects.paddleGlow.player1 - 0.1);
+    visualEffects.paddleGlow.player2 = Math.max(0, visualEffects.paddleGlow.player2 - 0.1);
+
+    spawnPowerUp();
+
+    // Move paddles (only if not being controlled by touch)
+    if (!activePaddle || activePaddle !== player1) {
+        player1.y += player1.speed;
+    }
+    if (!activePaddle || activePaddle !== player2) {
+        player2.y += player2.speed;
+    }
+
+    // Keep paddles within canvas bounds using currentPaddleHeight
+    if (player1.y < 0) player1.y = 0;
+    if (player1.y > canvas.height - currentPaddleHeight) player1.y = canvas.height - currentPaddleHeight;
+    if (player2.y < 0) player2.y = 0;
+    if (player2.y > canvas.height - currentPaddleHeight) player2.y = canvas.height - currentPaddleHeight;
+
+    // Move ball
+    ball.x += ball.speedX;
+    ball.y += ball.speedY;
+
+    // Ball collision with top and bottom
+    if (ball.y < 0 || ball.y > canvas.height - ballSize) {
+        ball.speedY *= -1;
+    }
+
+    // Ball collision with paddles using currentPaddleHeight
+    if (ball.x < paddleWidth && ball.y > player1.y && ball.y < player1.y + currentPaddleHeight) {
+        ball.speedX *= -1;
+        ball.x = paddleWidth;
+        ball.speedY += (Math.random() - 0.5) * 2;
+        
+        // Add paddle ripple effect
+        visualEffects.paddleRipples.push(new PaddleRipple(ball.x, ball.y, player1.color));
+        
+        // Apply power shot effect
+        if (powerShot.player1) {
+            ball.speedX *= powerShot.strength.speed;
+            ball.speedY *= powerShot.strength.vertical;
+            createParticles(ball.x, ball.y, '#FFD700', 30);
+            visualEffects.powerShotTrail.push(new PowerShotTrail(ball.x, ball.y, '#FFD700'));
+            visualEffects.paddleGlow.player1 = 1;
+            visualEffects.screenShake = { intensity: 5, duration: 10 };
+            visualEffects.specialEvents.push(new SpecialEvent(ball.x, ball.y, 'powerShot'));
+            powerShot.player1 = false;
+        }
+        
+        if (player1.powerUp && powerUp.type === 'speed') {
+            ball.speedX *= 1.2;
+        }
+        createParticles(ball.x, ball.y, player1.color);
+        playSound('paddleHit', 0.4);
+        visualEffects.specialEvents.push(new SpecialEvent(ball.x, ball.y, 'paddleWave'));
+    }
+
+    if (ball.x > canvas.width - paddleWidth - ballSize && 
+        ball.y > player2.y && 
+        ball.y < player2.y + currentPaddleHeight) {
+        ball.speedX *= -1;
+        ball.x = canvas.width - paddleWidth - ballSize;
+        ball.speedY += (Math.random() - 0.5) * 2;
+        
+        // Add paddle ripple effect
+        visualEffects.paddleRipples.push(new PaddleRipple(ball.x, ball.y, player2.color));
+        
+        // Apply power shot effect
+        if (powerShot.player2) {
+            ball.speedX *= powerShot.strength.speed;
+            ball.speedY *= powerShot.strength.vertical;
+            createParticles(ball.x, ball.y, '#FFD700', 30);
+            visualEffects.powerShotTrail.push(new PowerShotTrail(ball.x, ball.y, '#FFD700'));
+            visualEffects.paddleGlow.player2 = 1;
+            visualEffects.screenShake = { intensity: 5, duration: 10 };
+            visualEffects.specialEvents.push(new SpecialEvent(ball.x, ball.y, 'powerShot'));
+            powerShot.player2 = false;
+        }
+        
+        if (player2.powerUp && powerUp.type === 'speed') {
+            ball.speedX *= 1.2;
+        }
+        createParticles(ball.x, ball.y, player2.color);
+        playSound('paddleHit', 0.4);
+        visualEffects.specialEvents.push(new SpecialEvent(ball.x, ball.y, 'paddleWave'));
+    }
+
+    // Power-up collision
+    if (powerUp.active) {
+        const distance = Math.sqrt(
+            Math.pow(ball.x - powerUp.x, 2) + 
+            Math.pow(ball.y - powerUp.y, 2)
+        );
+        if (distance < ballSize + 10) {
+            const player = ball.x < canvas.width / 2 ? player1 : player2;
+            activatePowerUp(player);
+            powerUp.active = false;
+            powerUpElement.style.display = 'none';
+            showPowerUpFlash('#FFD700');
+            createParticles(powerUp.x, powerUp.y, '#FFD700', 40);
+            visualEffects.specialEvents.push(new SpecialEvent(powerUp.x, powerUp.y, 'powerUp'));
+            playSound('powerUp', 0.5);
+        }
+    }
+
+    // Score points
+    if (ball.x < 0) {
+        player2Score++;
+        if (player2Score > lastScore) {
+            vibrate(50);
+            showScoreAnimation(canvas.width - 100, 50, 1);
+            showScoreFlash(player2.color);
+            createParticles(canvas.width - 50, canvas.height / 2, player2.color, 30);
+            visualEffects.specialEvents.push(new SpecialEvent(canvas.width - 50, canvas.height / 2, 'score'));
+            playSound('score', 0.6);
+        }
+        resetBall();
+    } else if (ball.x > canvas.width) {
+        player1Score++;
+        if (player1Score > lastScore) {
+            vibrate(50);
+            showScoreAnimation(100, 50, 1);
+            showScoreFlash(player1.color);
+            createParticles(50, canvas.height / 2, player1.color, 30);
+            visualEffects.specialEvents.push(new SpecialEvent(50, canvas.height / 2, 'score'));
+            playSound('score', 0.6);
+        }
+        resetBall();
+    }
+
+    lastScore = Math.max(player1Score, player2Score);
+
+    // Check for winner
+    if (player1Score >= maxScore || player2Score >= maxScore) {
+        gameWon = true;
+        const winner = player1Score >= maxScore ? "Player 1" : "Player 2";
+        winnerElement.textContent = `${winner} Wins!`;
+        winnerElement.style.display = 'block';
+        restartButton.style.display = 'block';
+        playSound('gameOver', 0.7);
+    }
+
+    // Update score display
+    scoreElement.textContent = `Player 1: ${player1Score} | Player 2: ${player2Score}`;
+
+    // Send game state to server
+    if (isOnline && gameId && playerNumber === 1) {
+        const gameState = {
+            ball: {
+                x: ball.x,
+                y: ball.y,
+                speedX: ball.speedX,
+                speedY: ball.speedY
+            },
+            player1: { y: player1.y },
+            player2: { y: player2.y },
+            score: {
+                player1: player1Score,
+                player2: player2Score
+            }
+        };
+
+        ws.send(JSON.stringify({
+            type: 'gameUpdate',
+            gameState: gameState
+        }));
+    }
+}
+
+// Reset ball to center
+function resetBall() {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height / 2;
+    ball.speedX = -ball.speedX;
+    ball.speedY = Math.random() * 4 - 2;
+}
+
+// Haptic feedback
+function vibrate(duration) {
+    if (navigator.vibrate) {
+        navigator.vibrate(duration);
+    }
+}
+
+// Draw game objects
+function draw() {
+    // Clear canvas with gradient background
+    const bgGradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    bgGradient.addColorStop(0, 'rgba(0, 0, 0, 0.8)');
+    bgGradient.addColorStop(1, 'rgba(0, 0, 0, 0.9)');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw a subtle grid pattern
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1;
+    const gridSize = 20;
+    for(let i = 0; i < canvas.width; i += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, canvas.height);
+        ctx.stroke();
+    }
+    for(let i = 0; i < canvas.height; i += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(canvas.width, i);
+        ctx.stroke();
+    }
+
+    // Draw ball trails first (so they appear behind the ball)
+    visualEffects.ballTrails.forEach(trail => trail.draw(ctx));
+
+    // Draw paddle ripples
+    visualEffects.paddleRipples.forEach(ripple => ripple.draw(ctx));
+
+    // Draw special events
+    visualEffects.specialEvents.forEach(event => event.draw(ctx));
+
+    // Draw paddles with gradient and power-up effect
+    const gradient1 = ctx.createLinearGradient(0, player1.y, 0, player1.y + currentPaddleHeight);
+    gradient1.addColorStop(0, player1.color);
+    gradient1.addColorStop(1, '#FF8E8E');
+    ctx.fillStyle = gradient1;
+    
+    // Add glow effect for player 1
+    if (visualEffects.paddleGlow.player1 > 0) {
+        ctx.shadowColor = player1.color;
+        ctx.shadowBlur = 20 + visualEffects.paddleGlow.player1 * 30;
+        ctx.fillRect(0, player1.y, paddleWidth, currentPaddleHeight);
+        ctx.shadowBlur = 0;
+    }
+    ctx.fillRect(0, player1.y, paddleWidth, currentPaddleHeight);
+
+    const gradient2 = ctx.createLinearGradient(0, player2.y, 0, player2.y + currentPaddleHeight);
+    gradient2.addColorStop(0, player2.color);
+    gradient2.addColorStop(1, '#6EE7E0');
+    ctx.fillStyle = gradient2;
+    
+    // Add glow effect for player 2
+    if (visualEffects.paddleGlow.player2 > 0) {
+        ctx.shadowColor = player2.color;
+        ctx.shadowBlur = 20 + visualEffects.paddleGlow.player2 * 30;
+        ctx.fillRect(canvas.width - paddleWidth, player2.y, paddleWidth, currentPaddleHeight);
+        ctx.shadowBlur = 0;
+    }
+    ctx.fillRect(canvas.width - paddleWidth, player2.y, paddleWidth, currentPaddleHeight);
+
+    // Draw ball with glow effect
+    ctx.shadowColor = ball.color;
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ballSize, 0, Math.PI * 2);
+    ctx.fillStyle = ball.color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Draw center line with gradient
+    ctx.setLineDash([5, 15]);
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    const lineGradient = ctx.createLinearGradient(canvas.width / 2, 0, canvas.width / 2, canvas.height);
+    lineGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+    lineGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+    lineGradient.addColorStop(1, 'rgba(255, 255, 255, 0.2)');
+    ctx.strokeStyle = lineGradient;
+    ctx.stroke();
+
+    // Draw scoring flash effect
+    if (visualEffects.scoreFlash.active) {
+        const alpha = visualEffects.scoreFlash.duration / 20;
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Draw power-up flash effect
+    if (visualEffects.powerUpFlash.active) {
+        const alpha = visualEffects.powerUpFlash.duration / 30;
+        ctx.fillStyle = `rgba(255, 215, 0, ${alpha * 0.2})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Draw power-up with enhanced effects
+    if (powerUp.active) {
+        // Draw power-up glow
+        const gradient = ctx.createRadialGradient(
+            powerUp.x, powerUp.y, 0,
+            powerUp.x, powerUp.y, 20
+        );
+        gradient.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
+        gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(powerUp.x, powerUp.y, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw power-up icon
+        ctx.beginPath();
+        ctx.arc(powerUp.x, powerUp.y, 10, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFD700';
+        ctx.fill();
+        ctx.shadowColor = '#FFD700';
+        ctx.shadowBlur = 20;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Draw power-up type indicator
+        ctx.fillStyle = '#FFF';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(powerUp.type === 'speed' ? '⚡' : '🌟', powerUp.x, powerUp.y + 4);
+    }
+
+    // Draw score with enhanced effects
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 10;
+    ctx.fillText(`${player1Score} | ${player2Score}`, canvas.width / 2, 40);
+    ctx.shadowBlur = 0;
+
+    // Draw power shot trails
+    visualEffects.powerShotTrail.forEach(trail => trail.draw(ctx));
+
+    // Draw pause overlay if game is paused
+    if (isPaused) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
+    }
+
+    // Apply screen shake
+    applyScreenShake();
+}
+
+// Game loop
+function gameLoop() {
+    if (!gameWon && !isPaused && gameStarted) {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+}
+
+// Start the game with countdown
+startCountdown();
+
+function showInstructions() {
+    const gameMenu = document.getElementById('gameMenu');
+    gameMenu.innerHTML = `
+        <h1>How to Play</h1>
+        <div style="color: #fff; margin-bottom: 20px; line-height: 1.6;">
+            <p><span class="key">W</span> / <span class="key">S</span> - Player 1 Controls</p>
+            <p><span class="key">D</span> - Player 1 Power Shot</p>
+            <p><span class="key">↑</span> / <span class="key">↓</span> - Player 2 Controls</p>
+            <p><span class="key">&lt;</span> - Player 2 Power Shot</p>
+            <p>First to 11 points wins!</p>
+            <p>Collect power-ups to gain advantages!</p>
+            <p>Mobile: Swipe towards opponent for Power Shot!</p>
+        </div>
+        <button class="menu-button" onclick="showMainMenu()">Back to Menu</button>
+    `;
+}
+
+function showMainMenu() {
+    const gameMenu = document.getElementById('gameMenu');
+    gameMenu.innerHTML = `
+        <h1>PING PONG</h1>
+        <button class="menu-button glow-effect" onclick="startGame()">Start Game</button>
+        <button class="menu-button" onclick="showInstructions()">How to Play</button>
+    `;
+}
+
+// Add WebSocket connection
+let ws;
+let playerId = null;
+let playerNumber = null;
+let gameId = null;
+let isOnline = false;
+
+// Connect to WebSocket server
+function connectToServer() {
+    ws = new WebSocket('ws://localhost:8080');
+
+    ws.onopen = () => {
+        console.log('Connected to server');
+        isOnline = true;
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleServerMessage(data);
+    };
+
+    ws.onclose = () => {
+        console.log('Disconnected from server');
+        isOnline = false;
+        showDisconnectedMessage();
+    };
+}
+
+// Handle server messages
+function handleServerMessage(data) {
+    switch (data.type) {
+        case 'connected':
+            playerId = data.playerId;
+            break;
+        case 'matchmaking':
+            handleMatchmakingStatus(data.status);
+            break;
+        case 'gameStart':
+            handleGameStart(data);
+            break;
+        case 'gameUpdate':
+            handleGameUpdate(data.gameState);
+            break;
+        case 'opponentDisconnected':
+            handleOpponentDisconnect();
+            break;
+    }
+}
+
+// Handle matchmaking status
+function handleMatchmakingStatus(status) {
+    const gameMenu = document.getElementById('gameMenu');
+    if (status === 'waiting') {
+        gameMenu.innerHTML = `
+            <h1>Finding Opponent...</h1>
+            <div class="loading-spinner"></div>
+            <button class="menu-button" onclick="cancelMatchmaking()">Cancel</button>
+        `;
+    } else if (status === 'cancelled') {
+        showMainMenu();
+    }
+}
+
+// Handle game start
+function handleGameStart(data) {
+    gameId = data.gameId;
+    playerNumber = data.playerNumber;
+    
+    const gameMenu = document.getElementById('gameMenu');
+    gameMenu.innerHTML = `
+        <h1>Game Starting!</h1>
+        <div>You are Player ${playerNumber}</div>
+        <div class="loading-spinner"></div>
+    `;
+
+    // Reset game state
+    resetGameState();
+    
+    // Start countdown
+    setTimeout(() => {
+        gameMenu.style.display = 'none';
+        startCountdown();
+    }, 3000);
+}
+
+// Handle game update from server
+function handleGameUpdate(gameState) {
+    if (playerNumber === 2) {
+        // Update opponent's paddle position
+        player1.y = gameState.player1.y;
+        // Update ball position
+        ball.x = gameState.ball.x;
+        ball.y = gameState.ball.y;
+        ball.speedX = gameState.ball.speedX;
+        ball.speedY = gameState.ball.speedY;
+        // Update score
+        player1Score = gameState.score.player1;
+        player2Score = gameState.score.player2;
+    }
+}
+
+// Handle opponent disconnect
+function handleOpponentDisconnect() {
+    gameWon = true;
+    winnerElement.textContent = "Opponent Disconnected!";
+    winnerElement.style.display = 'block';
+    restartButton.style.display = 'block';
+    playSound('gameOver', 0.7);
+}
+
+// Show disconnected message
+function showDisconnectedMessage() {
+    const gameMenu = document.getElementById('gameMenu');
+    gameMenu.innerHTML = `
+        <h1>Connection Lost</h1>
+        <p>Please check your internet connection and try again.</p>
+        <button class="menu-button" onclick="reconnect()">Reconnect</button>
+    `;
+}
+
+// Reconnect to server
+function reconnect() {
+    connectToServer();
+    showMainMenu();
+}
+
+// Cancel matchmaking
+function cancelMatchmaking() {
+    if (ws && isOnline) {
+        ws.send(JSON.stringify({
+            type: 'cancelMatchmaking'
+        }));
+    }
+}
+
+// Modify startGame function
+function startGame() {
+    if (!isOnline) {
+        connectToServer();
+    }
+
+    const gameMenu = document.getElementById('gameMenu');
+    gameMenu.style.display = 'none';
+    
+    // Request match
+    ws.send(JSON.stringify({
+        type: 'findMatch'
+    }));
+}
+
+function resetGameState() {
+    // Reset paddle positions
+    player1.y = canvas.height / 2 - currentPaddleHeight / 2;
+    player2.y = canvas.height / 2 - currentPaddleHeight / 2;
+    player1.speed = 0;
+    player2.speed = 0;
+    
+    // Reset ball
+    resetBall();
+    
+    // Clear power-ups
+    powerUp.active = false;
+    powerUpElement.style.display = 'none';
+}
+
+function createParticles(x, y, color, count = 10) {
+    for(let i = 0; i < count; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = x + 'px';
+        particle.style.top = y + 'px';
+        particle.style.width = '4px';
+        particle.style.height = '4px';
+        particle.style.background = color;
+        particle.style.borderRadius = '50%';
+        
+        // Random direction
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * 50 + 20;
+        const tx = Math.cos(angle) * distance;
+        const ty = Math.sin(angle) * distance;
+        
+        particle.style.setProperty('--tx', `${tx}px`);
+        particle.style.setProperty('--ty', `${ty}px`);
+        
+        gameContainer.appendChild(particle);
+        setTimeout(() => particle.remove(), 1000);
+    }
+}
+
+function showScoreAnimation(x, y, points) {
+    const scorePoint = document.createElement('div');
+    scorePoint.className = 'score-point';
+    scorePoint.textContent = `+${points}`;
+    scorePoint.style.left = x + 'px';
+    scorePoint.style.top = y + 'px';
+    scorePoint.style.fontSize = '32px';
+    scorePoint.style.fontWeight = 'bold';
+    scorePoint.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+    gameContainer.appendChild(scorePoint);
+    setTimeout(() => scorePoint.remove(), 1000);
+}
+
+// Function to play sound with volume control
+function playSound(soundName, volume = 1.0) {
+    const sound = sounds[soundName];
+    if (sound) {
+        sound.volume = volume;
+        sound.currentTime = 0;
+        sound.play().catch(e => console.log('Error playing sound:', e));
+    }
+}
+
+// Add scoring flash effect
+function showScoreFlash(color) {
+    visualEffects.scoreFlash = {
+        active: true,
+        duration: 20,
+        color: color
+    };
+}
+
+// Add power-up flash effect
+function showPowerUpFlash(color) {
+    visualEffects.powerUpFlash = {
+        active: true,
+        duration: 30,
+        color: color
+    };
+}
+
+// Initialize WebSocket connection
+connectToServer();
