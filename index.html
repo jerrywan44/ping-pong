@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ping Pong Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="score">Player 1: 0 | Player 2: 0</div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="winner"></div>
+        <div id="touchIndicator"></div>
+        <div id="countdown">3</div>
+        <div id="powerUp"></div>
+    </div>
+    <div id="instructions">
+        <span class="key">W</span> and <span class="key">S</span> keys to control Player 1 paddle<br>
+        <span class="key">↑</span> and <span class="key">↓</span> arrow keys to control Player 2 paddle<br>
+        First to 11 points wins!
+    </div>
+    <button id="restartButton" style="display: none;">Play Again</button>
+    <button id="pauseButton">Pause</button>
+    <div id="mobileControls">
+        Touch and slide to control your paddle
+    </div>
+    <div id="gameMenu">
+        <h1>PING PONG</h1>
+        <button class="menu-button glow-effect" onclick="startGame()">Start Game</button>
+        <button class="menu-button" onclick="showInstructions()">How to Play</button>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
